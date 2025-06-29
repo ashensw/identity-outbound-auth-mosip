@@ -1,0 +1,10 @@
+{
+  "id": "mosip-idp",
+  "name": "MOSIP",
+  "description": "Authenticate users with MOSIP Digital ID using demographic, biometric, or OTP verification",
+  "image": "assets/images/logos/mosip.svg",
+  "category": "DEFAULT",
+  "displayOrder": 8,
+  "tags": ["identity-provider", "national-id", "mosip", "digital-id", "kyc"],
+  "type": "identity-provider"
+}

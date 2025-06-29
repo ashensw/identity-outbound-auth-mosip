@@ -1,0 +1,367 @@
+{
+  "idp": {
+    "name": "mosip",
+    "displayName": "MOSIP ID Authentication",
+    "description": "Authenticate users using their MOSIP Digital ID through the MOSIP Authentication Service",
+    "image": "assets/images/logos/mosip.svg",
+    "category": "DEFAULT",
+    "order": {
+      "defaultOrder": 1,
+      "categories": {
+        "SOCIAL_LOGIN": 1,
+        "ENTERPRISE": 5,
+        "OTHER": 1
+      }
+    }
+  },
+  "additionalData": {
+    "features": [{
+      "displayName": "ID Authentication",
+      "description": "Authenticate users using their MOSIP Digital ID"
+    }, {
+      "displayName": "Multi-Factor Authentication",
+      "description": "Support for demographic, biometric, and OTP authentication"
+    }, {
+      "displayName": "KYC Data Retrieval",
+      "description": "Retrieve user profile data during authentication"
+    }, {
+      "displayName": "Just-in-Time Provisioning",
+      "description": "Automatically provision users in the system during authentication"
+    }],
+    "uiAttributes": {
+      "displayIcon": "mosip.svg",
+      "templateId": "mosip",
+      "customPropertiesSchema": {
+        "properties": [
+          {
+            "key": "baseUrl",
+            "displayName": "MOSIP IDA Base URL",
+            "description": "Base URL of the MOSIP ID Authentication API endpoint",
+            "placeholder": "https://api.example.com",
+            "type": "string",
+            "isRequired": true
+          },
+          {
+            "key": "mispLicenseKey",
+            "displayName": "MISP License Key",
+            "description": "MISP License Key for authentication",
+            "placeholder": "Enter your MISP License Key",
+            "type": "string",
+            "isRequired": true,
+            "isConfidential": true
+          },
+          {
+            "key": "partnerId",
+            "displayName": "Auth Partner ID",
+            "description": "MOSIP Auth Partner ID",
+            "placeholder": "Enter your Partner ID",
+            "type": "string",
+            "isRequired": true
+          },
+          {
+            "key": "oidcClientId",
+            "displayName": "OIDC Client ID",
+            "description": "Auto generated while creating OIDC client in PMS",
+            "placeholder": "Enter your OIDC Client ID",
+            "type": "string",
+            "isRequired": true,
+            "isConfidential": true
+          },
+          {
+            "key": "env",
+            "displayName": "Environment",
+            "description": "Enter the environment (e.g., Staging, Production). Defaults to 'Staging'.",
+            "placeholder": "Enter your MOSIP Environment",
+            "type": "string",
+            "isRequired": true
+          },
+          {
+            "key": "domainUri",
+            "displayName": "Domain URI",
+            "description": "Enter the domain URI for the MOSIP ID Authentication service",
+            "placeholder": "Enter your Domain URI",
+            "type": "string",
+            "isRequired": true
+          }
+        ]
+      }
+    }
+  },
+  "create": {
+    "image": "assets/images/logos/mosip.svg",
+    "header": "MOSIP",
+    "Subheading": "Enable login for users with MOSIP Digital ID.",
+    "documentation": "",
+    "modal": {
+      "form": {
+        "fields": [
+          {
+            "index": 0,
+            "ariaLabel": "MOSIP IDP Name",
+            "name": "name",
+            "label": "Name",
+            "type": "text",
+            "required": true,
+            "placeholder": "Enter a name for the connection.",
+            "initialValue": "MOSIP",
+            "data-testid": "mosip-idp-create-wizard-page-idp-name",
+            "maxLength": "50",
+            "minLength": "3",
+            "width": "13"
+          },
+          {
+            "index": 1,
+            "ariaLabel": "MOSIP Auth Base URL",
+            "type": "text",
+            "name": "baseUrl",
+            "label": "MOSIP Base URL",
+            "placeholder": "Enter MOSIP IDA Base URL.",
+            "required": true,
+            "autoComplete": false,
+            "data-testid": "mosip-idp-create-wizard-page-idp-base-url",
+            "maxLength": "100",
+            "minLength": "3",
+            "width": "13"
+          },
+          {
+            "index": 2,
+            "ariaLabel": "MISP License Key",
+            "type": "password",
+            "name": "mispLicenseKey",
+            "label": "MISP License Key",
+            "placeholder": "Enter MISP License Key.",
+            "required": true,
+            "autoComplete": false,
+            "data-testid": "mosip-idp-create-wizard-page-idp-misp-license-key",
+            "maxLength": "100",
+            "minLength": "3",
+            "width": "13"
+          },
+          {
+            "index": 3,
+            "ariaLabel": "Partner ID",
+            "type": "text",
+            "name": "partnerId",
+            "label": "Auth Partner ID",
+            "placeholder": "Enter MOSIP Auth Partner ID.",
+            "required": true,
+            "autoComplete": false,
+            "data-testid": "mosip-idp-create-wizard-page-idp-partner-id",
+            "maxLength": "100",
+            "minLength": "3",
+            "width": "13"
+          },
+          {
+            "index": 4,
+            "ariaLabel": "OIDC Client ID",
+            "type": "password",
+            "name": "oidcClientId",
+            "label": "OIDC Client ID",
+            "placeholder": "Enter OIDC Client ID.",
+            "required": true,
+            "autoComplete": false,
+            "data-testid": "mosip-idp-create-wizard-page-idp-oidc-client-id",
+            "maxLength": "100",
+            "minLength": "3",
+            "width": "13"
+          },
+          {
+            "index": 5,
+            "ariaLabel": "MOSIP Environment",
+            "type": "text",
+            "name": "env",
+            "label": "Environment",
+            "placeholder": "Enter MOSIP Environment.",
+            "required": false,
+            "autoComplete": false,
+            "data-testid": "mosip-idp-create-wizard-page-idp-env",
+            "maxLength": "100",
+            "minLength": "3",
+            "width": "13"
+          },
+          {
+            "index": 6,
+            "ariaLabel": "Domain URI",
+            "type": "text",
+            "name": "domainUri",
+            "label": "Domain URI",
+            "placeholder": "Enter your Domain URI.",
+            "required": true,
+            "autoComplete": false,
+            "data-testid": "mosip-idp-create-wizard-page-idp-domain-uri",
+            "maxLength": "100",
+            "minLength": "3",
+            "width": "13"
+          }
+        ]
+      },
+      "wizardHelp": {
+        "message": {
+          "header": "Prerequisites",
+          "paragraphs": [
+            "MOSIP helps you to authenticate users using their national digital ID. To use MOSIP, you need to have access to a MOSIP ID Authentication service."
+          ]
+        },
+        "fields": [
+          {
+            "fieldName": "Name",
+            "hint": "Provide a unique name for the connection."
+          },
+          {
+            "fieldName": "MOSIP Base URL",
+            "hint": "Provide the Base URL of your MOSIP ID Authentication service."
+          },
+          {
+            "fieldName": "MISP License Key",
+            "hint": "Enter the MISP License Key provided for authentication."
+          },
+          {
+            "fieldName": "Auth Partner ID",
+            "hint": "Enter the MOSIP Auth Partner ID for your application."
+          },
+          {
+            "fieldName": "OIDC Client ID",
+            "hint": "Enter the OIDC Client ID auto generated while creating OIDC client in PMS."
+          },
+          {
+            "fieldName": "Environment",
+            "hint": "Enter the environment (e.g., Staging, Production). Defaults to 'Staging'."
+          },
+          {
+            "fieldName": "Domain URI",
+            "hint": "Enter the domain URI for the MOSIP ID Authentication service."
+          }
+        ]
+      }
+    },
+    "properties": [
+      {
+        "key": "baseUrl",
+        "value": ""
+      },
+      {
+        "key": "mispLicenseKey",
+        "value": ""
+      },
+      {
+        "key": "partnerId",
+        "value": ""
+      },
+      {
+        "key": "oidcClientId",
+        "value": ""
+      },
+      {
+        "key": "env",
+        "value": ""
+      },
+      {
+        "key": "domainUri",
+        "value": ""
+      }
+    ]
+  },
+  "edit": {
+    "tabs": {
+      "general": [
+        {
+          "index": 1,
+          "displayOrder": 1,
+          "type": "textarea",
+          "name": "description",
+          "ariaLabel": "description",
+          "label": "Description",
+          "required": false,
+          "placeholder": "Enter a description of the identity provider.",
+          "value": "",
+          "data-testid": "idp-edit-page-general-settings-form-idp-description",
+          "maxLength": "300",
+          "minLength": "3",
+          "hint": "A text description of the identity provider.",
+          "readOnly": false
+        },
+        {
+          "index": 2,
+          "displayOrder": 2,
+          "type": "certbox",
+          "isJWKSEnabled": "",
+          "isReadOnly": "",
+          "editingIDP": "",
+          "onUpdate": "",
+          "isPEMEnabled": ""
+        }
+      ],
+      "settings": [
+        {
+          "index": 3,
+          "displayOrder": 3,
+          "label": "MOSIP Base URL",
+          "data-testid": "idp-edit-page-authenticator-settings-MOSIPAuthenticator-content-form-baseUrl",
+          "name": "baseUrl",
+          "required": true,
+          "type": "text",
+          "hint": "Enter MOSIP IDA Base URL.",
+          "validation": true
+        },
+        {
+          "index": 4,
+          "displayOrder": 4,
+          "label": "MISP License Key",
+          "data-testid": "idp-edit-page-authenticator-settings-MOSIPAuthenticator-content-form-mispLicenseKey",
+          "name": "mispLicenseKey",
+          "required": true,
+          "type": "password",
+          "hint": "Enter MISP License Key.",
+          "validation": true
+        },
+        {
+          "index": 5,
+          "displayOrder": 5,
+          "label": "Auth Partner ID",
+          "data-testid": "idp-edit-page-authenticator-settings-MOSIPAuthenticator-content-form-partnerId",
+          "name": "partnerId",
+          "required": true,
+          "type": "text",
+          "hint": "Enter MOSIP Auth Partner ID.",
+          "validation": true
+        },
+        {
+          "index": 6,
+          "displayOrder": 6,
+          "label": "OIDC Client ID",
+          "data-testid": "idp-edit-page-authenticator-settings-MOSIPAuthenticator-content-form-oidc-client-id",
+          "name": "oidcClientId",
+          "required": true,
+          "type": "password",
+          "hint": "Enter OIDC Client ID.",
+          "validation": true
+        },
+        {
+          "index": 7,
+          "displayOrder": 7,
+          "label": "MOSIP Environment",
+          "data-testid": "idp-edit-page-authenticator-settings-MOSIPAuthenticator-content-form-env",
+          "name": "env",
+          "required": false,
+          "type": "text",
+          "hint": "Enter MOSIP Environment.",
+          "validation": true
+        },
+        {
+          "index": 8,
+          "displayOrder": 8,
+          "label": "Domain URI",
+          "data-testid": "idp-edit-page-authenticator-settings-MOSIPAuthenticator-content-form-domainUri",
+          "name": "domainUri",
+          "required": true,
+          "type": "text",
+          "hint": "Enter the domain URI for the MOSIP ID Authentication service.",
+          "validation": true
+        }
+      ],
+      "quickStart": {
+
+      }
+    }
+  }
+}
