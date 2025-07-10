@@ -19,7 +19,7 @@
 package org.wso2.carbon.identity.application.authenticator.mosip.internal;
 
 import org.wso2.carbon.identity.application.authentication.framework.ApplicationAuthenticator;
-import org.wso2.carbon.identity.application.authenticator.mosip.client.MOSIPClient;
+import org.wso2.carbon.identity.application.authenticator.mosip.client.RESTClient;
 import org.wso2.carbon.identity.application.authenticator.mosip.service.MOSIPAuthService;
 import org.wso2.carbon.user.core.service.RealmService;
 
@@ -38,7 +38,7 @@ public class MOSIPAuthenticatorServiceDataHolder {
     private RealmService realmService;
 
     // Core service instances with lazy initialization
-    private MOSIPClient mosipClient = null;
+    private RESTClient RESTClient = null;
     private MOSIPAuthService mosipAuthService = null;
 
     private MOSIPAuthenticatorServiceDataHolder() {
@@ -105,22 +105,22 @@ public class MOSIPAuthenticatorServiceDataHolder {
      *
      * @return The MOSIP client
      */
-    public MOSIPClient getMosipClient() {
+    public RESTClient getMOSIPClient() {
 
-        if (mosipClient == null) {
-            mosipClient = new MOSIPClient();
+        if (RESTClient == null) {
+            RESTClient = new RESTClient();
         }
-        return mosipClient;
+        return RESTClient;
     }
 
     /**
-     * Set the MOSIP client
+     * Set the REST client
      *
-     * @param mosipClient The MOSIP client
+     * @param RESTClient The MOSIP client
      */
-    public void setMosipClient(MOSIPClient mosipClient) {
+    public void setRESTClient(RESTClient RESTClient) {
 
-        this.mosipClient = mosipClient;
+        this.RESTClient = RESTClient;
     }
 
     /**
@@ -128,10 +128,10 @@ public class MOSIPAuthenticatorServiceDataHolder {
      *
      * @return The MOSIP auth service
      */
-    public MOSIPAuthService getMosipAuthService() {
+    public MOSIPAuthService getMOSIPAuthService() {
 
         if (mosipAuthService == null) {
-            mosipAuthService = new MOSIPAuthService(getMosipClient());
+            mosipAuthService = new MOSIPAuthService(getMOSIPClient());
         }
         return mosipAuthService;
     }
@@ -141,7 +141,7 @@ public class MOSIPAuthenticatorServiceDataHolder {
      *
      * @param mosipAuthService The MOSIP auth service
      */
-    public void setMosipAuthService(MOSIPAuthService mosipAuthService) {
+    public void setMOSIPAuthService(MOSIPAuthService mosipAuthService) {
 
         this.mosipAuthService = mosipAuthService;
     }

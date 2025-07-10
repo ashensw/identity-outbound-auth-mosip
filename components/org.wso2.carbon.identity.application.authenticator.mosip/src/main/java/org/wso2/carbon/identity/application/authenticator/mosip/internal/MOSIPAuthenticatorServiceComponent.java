@@ -49,7 +49,7 @@ public class MOSIPAuthenticatorServiceComponent {
 
         try {
             // Get service instances from the service holder
-            MOSIPAuthService mosipAuthService = MOSIPAuthenticatorServiceDataHolder.getInstance().getMosipAuthService();
+            MOSIPAuthService mosipAuthService = MOSIPAuthenticatorServiceDataHolder.getInstance().getMOSIPAuthService();
 
             // Create the authenticator with the service instances
             MOSIPAuthenticator mosipAuthenticator = new MOSIPAuthenticator(mosipAuthService);

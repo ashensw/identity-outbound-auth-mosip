@@ -24,7 +24,7 @@ import java.util.List;
 /**
  * Data Transfer Object for MOSIP Send OTP Request (aligned with MOSIP plugin IdaSendOtpRequest)
  */
-public class MOSIPSendOtpRequestDTO implements Serializable {
+public class MOSIPSendOTPRequestDTO implements Serializable {
 
     private static final long serialVersionUID = 1L;
 

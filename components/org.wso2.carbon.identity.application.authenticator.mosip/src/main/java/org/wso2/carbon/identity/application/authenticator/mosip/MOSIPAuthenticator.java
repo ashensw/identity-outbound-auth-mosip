@@ -33,26 +33,22 @@ import org.wso2.carbon.identity.application.authentication.framework.exception.L
 import org.wso2.carbon.identity.application.authentication.framework.model.AuthenticatedUser;
 import org.wso2.carbon.identity.application.authentication.framework.util.FrameworkConstants;
 import org.wso2.carbon.identity.application.authentication.framework.util.FrameworkUtils;
+import org.wso2.carbon.identity.application.authenticator.mosip.constant.MOSIPAuthenticatorConstants;
+import org.wso2.carbon.identity.application.authenticator.mosip.constant.MOSIPErrorConstants;
+import org.wso2.carbon.identity.application.authenticator.mosip.dto.MOSIPKycAuthResponseDTO;
+import org.wso2.carbon.identity.application.authenticator.mosip.dto.MOSIPKycExchangeResponseDTO;
+import org.wso2.carbon.identity.application.authenticator.mosip.dto.MOSIPSendOTPResponseDTO;
+import org.wso2.carbon.identity.application.authenticator.mosip.exception.MOSIPAuthenticationException;
+import org.wso2.carbon.identity.application.authenticator.mosip.internal.MOSIPAuthenticatorServiceDataHolder;
+import org.wso2.carbon.identity.application.authenticator.mosip.service.MOSIPAuthService;
+import org.wso2.carbon.identity.application.authenticator.mosip.util.KeyStoreManager;
 import org.wso2.carbon.identity.application.common.model.ClaimMapping;
 import org.wso2.carbon.identity.application.common.model.Property;
 import org.wso2.carbon.identity.core.ServiceURLBuilder;
 import org.wso2.carbon.identity.core.URLBuilderException;
-import org.wso2.carbon.identity.application.authenticator.mosip.constant.MOSIPAuthenticatorConstants;
-import org.wso2.carbon.identity.application.authenticator.mosip.constant.MOSIPErrorConstants;
-import org.wso2.carbon.identity.application.authenticator.mosip.exception.MOSIPAuthenticationException;
-import org.wso2.carbon.identity.application.authenticator.mosip.internal.MOSIPAuthenticatorServiceDataHolder;
-import org.wso2.carbon.identity.application.authenticator.mosip.dto.MOSIPKycAuthResponseDTO;
-import org.wso2.carbon.identity.application.authenticator.mosip.dto.MOSIPKycExchangeResponseDTO;
-import org.wso2.carbon.identity.application.authenticator.mosip.dto.MOSIPSendOtpResponseDTO;
-import org.wso2.carbon.identity.application.authenticator.mosip.service.MOSIPAuthService;
-import org.wso2.carbon.identity.application.authenticator.mosip.util.KeyStoreManager;
-
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
@@ -60,6 +56,9 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
 
 /**
  * Authenticator to authenticate users with MOSIP Identity Authentication (IDA) service.
@@ -71,7 +70,7 @@ public class MOSIPAuthenticator extends AbstractApplicationAuthenticator impleme
 
     public MOSIPAuthenticator() {
 
-        this.mosipAuthService = MOSIPAuthenticatorServiceDataHolder.getInstance().getMosipAuthService();
+        this.mosipAuthService = MOSIPAuthenticatorServiceDataHolder.getInstance().getMOSIPAuthService();
     }
 
     public MOSIPAuthenticator(MOSIPAuthService mosipAuthService) {
@@ -94,13 +93,12 @@ public class MOSIPAuthenticator extends AbstractApplicationAuthenticator impleme
         validateAuthenticatorProperties(authenticatorProperties);
 
         // Initialize KeyStoreManager with authenticator properties from deployment.toml
-        // Use getAuthenticatorConfig().getParameterMap() to access the configuration values set in deployment.toml
         KeyStoreManager.getInstance(getAuthenticatorConfig().getParameterMap());
 
         String transactionId = MOSIPAuthService.generateTransactionId();
         context.setProperty(MOSIPAuthenticatorConstants.TRANSACTION_ID, transactionId);
 
-        redirectToMosipLoginPage(request, response, context);
+        redirectToMOSIPLoginPage(request, response, context);
     }
 
     @Override
@@ -132,30 +130,30 @@ public class MOSIPAuthenticator extends AbstractApplicationAuthenticator impleme
         }
 
         if (StringUtils.isNotEmpty(uinFromRequest) && StringUtils.isEmpty(otpFromRequest)) {
-            processUinSubmission(uinFromRequest, baseUrl, mispLK, partnerId, oidcClientId, domainUri,
-                    transactionId, request, response, context);
+            processUINSubmission(uinFromRequest, baseUrl, mispLK, partnerId, oidcClientId, transactionId, request,
+                    response, context);
         } else if (StringUtils.isNotEmpty(otpFromRequest)) {
-            processOtpSubmission(otpFromRequest, baseUrl, mispLK, partnerId, oidcClientId, environment,
-                    domainUri, transactionId, request, response, context);
+            processOTPSubmission(otpFromRequest, baseUrl, mispLK, partnerId, oidcClientId, environment,
+                    domainUri, transactionId, context);
         } else {
             throw new AuthenticationFailedException(MOSIPErrorConstants.INVALID_PARAMETER,
                     "Invalid authentication state: UIN or OTP parameters missing as expected.");
         }
     }
 
-    private void processUinSubmission(String uin, String baseUrl, String mispLK, String partnerId,
-                                      String oidcClientId, String domainUri, String transactionId, HttpServletRequest request,
+    private void processUINSubmission(String uin, String baseUrl, String mispLK, String partnerId,
+                                      String oidcClientId, String transactionId, HttpServletRequest request,
                                       HttpServletResponse response, AuthenticationContext context)
             throws AuthenticationFailedException {
 
         context.setProperty(MOSIPAuthenticatorConstants.UIN, uin);
         try {
-            MOSIPSendOtpResponseDTO otpResponse = mosipAuthService.sendOtp(
+            MOSIPSendOTPResponseDTO otpResponse = mosipAuthService.sendOtp(
                     baseUrl, mispLK, partnerId, oidcClientId,
-                    uin, Arrays.asList(MOSIPAuthenticatorConstants.OTP_CHANNELS), transactionId, domainUri);
+                    uin, Arrays.asList(MOSIPAuthenticatorConstants.OTP_CHANNELS), transactionId);
 
             if (otpResponse.getResponse() != null) {
-                redirectToOtpInputPage(uin, request, response, context);
+                redirectToOTPInputPage(uin, request, response, context);
                 context.setProperty(FrameworkConstants.REQ_ATTR_HANDLED, true);
             } else {
                 log.error("Failed to send OTP. Response indicates failure.");
@@ -169,10 +167,9 @@ public class MOSIPAuthenticator extends AbstractApplicationAuthenticator impleme
         }
     }
 
-    private void processOtpSubmission(String otp, String baseUrl, String mispLK, String partnerId,
+    private void processOTPSubmission(String otp, String baseUrl, String mispLK, String partnerId,
                                       String oidcClientId, String environment, String domainUri,
-                                      String transactionId, HttpServletRequest request,
-                                      HttpServletResponse response, AuthenticationContext context)
+                                      String transactionId, AuthenticationContext context)
             throws AuthenticationFailedException {
 
         String uinFromContext = (String) context.getProperty(MOSIPAuthenticatorConstants.UIN);
@@ -201,7 +198,7 @@ public class MOSIPAuthenticator extends AbstractApplicationAuthenticator impleme
 
             MOSIPKycExchangeResponseDTO kycExchangeResponse = mosipAuthService.kycExchange(
                     baseUrl, mispLK, partnerId, oidcClientId, uinFromContext, kycToken,
-                    consentClaims, transactionId, environment, domainUri);
+                    consentClaims, transactionId);
 
             processKycExchangeResponse(kycExchangeResponse, authenticatedUser, context);
 
@@ -209,10 +206,6 @@ public class MOSIPAuthenticator extends AbstractApplicationAuthenticator impleme
             log.error("MOSIP Authentication failed: " + e.getMessage(), e);
             throw new AuthenticationFailedException(e.getErrorCode(),
                     "Authentication failed: " + e.getMessage(), e);
-        } catch (IOException e) {
-            log.error("Network or IO error during authentication: " + e.getMessage(), e);
-            throw new AuthenticationFailedException(MOSIPErrorConstants.NETWORK_ERROR,
-                    "Network or IO error during authentication.", e);
         }
     }
 
@@ -251,11 +244,10 @@ public class MOSIPAuthenticator extends AbstractApplicationAuthenticator impleme
     }
 
     private void processKycExchangeResponse(MOSIPKycExchangeResponseDTO kycExchangeResponse,
-                                            AuthenticatedUser authenticatedUser,
-                                            AuthenticationContext context)
+                                            AuthenticatedUser authenticatedUser, AuthenticationContext context)
             throws AuthenticationFailedException {
 
-        String encryptedKyc = null;
+        String encryptedKyc;
         String decodedPayload = null;
 
         if (kycExchangeResponse != null && kycExchangeResponse.getResponse() != null) {
@@ -279,7 +271,7 @@ public class MOSIPAuthenticator extends AbstractApplicationAuthenticator impleme
 
         if (StringUtils.isNotEmpty(decodedPayload)) {
             Map<ClaimMapping, String> claims = buildClaimMappings(context, decodedPayload);
-            if (claims != null && !claims.isEmpty()) {
+            if (!claims.isEmpty()) {
                 authenticatedUser.setUserAttributes(claims);
             }
         } else {
@@ -460,7 +452,7 @@ public class MOSIPAuthenticator extends AbstractApplicationAuthenticator impleme
      * @param context  Authentication context
      * @throws AuthenticationFailedException If an error occurs during redirection
      */
-    private void redirectToMosipLoginPage(HttpServletRequest request, HttpServletResponse response,
+    private void redirectToMOSIPLoginPage(HttpServletRequest request, HttpServletResponse response,
                                           AuthenticationContext context)
             throws AuthenticationFailedException {
 
@@ -589,7 +581,7 @@ public class MOSIPAuthenticator extends AbstractApplicationAuthenticator impleme
      * @param context  Authentication context
      * @throws AuthenticationFailedException If an error occurs during redirection
      */
-    private void redirectToOtpInputPage(String uinValue, HttpServletRequest request,
+    private void redirectToOTPInputPage(String uinValue, HttpServletRequest request,
                                         HttpServletResponse response, AuthenticationContext context)
             throws AuthenticationFailedException {
 
@@ -745,22 +737,29 @@ public class MOSIPAuthenticator extends AbstractApplicationAuthenticator impleme
     private void validateAuthenticatorProperties(Map<String, String> authenticatorProperties)
             throws AuthenticationFailedException {
 
-        String baseUrl = authenticatorProperties.get(MOSIPAuthenticatorConstants.BASE_URL);
-        String mispLK = authenticatorProperties.get(MOSIPAuthenticatorConstants.MISP_LICENSE_KEY);
-        String partnerId = authenticatorProperties.get(MOSIPAuthenticatorConstants.PARTNER_ID);
-        String oidcClientId = authenticatorProperties.get(MOSIPAuthenticatorConstants.OIDC_CLIENT_ID);
+        if (authenticatorProperties.isEmpty()) {
+            throw new AuthenticationFailedException(
+                    "Authenticator properties are not configured for the authenticator");
+        }
 
-        if (StringUtils.isEmpty(baseUrl)) {
+        if (StringUtils.isEmpty(authenticatorProperties.get(MOSIPAuthenticatorConstants.BASE_URL))) {
             throw new AuthenticationFailedException("Base URL is not configured for the authenticator");
         }
-        if (StringUtils.isEmpty(mispLK)) {
+        if (StringUtils.isEmpty(authenticatorProperties.get(MOSIPAuthenticatorConstants.MISP_LICENSE_KEY))) {
             throw new AuthenticationFailedException("MISP License Key is not configured for the authenticator");
         }
-        if (StringUtils.isEmpty(partnerId)) {
+        if (StringUtils.isEmpty(authenticatorProperties.get(MOSIPAuthenticatorConstants.PARTNER_ID))) {
             throw new AuthenticationFailedException("Partner ID is not configured for the authenticator");
         }
-        if (StringUtils.isEmpty(oidcClientId)) {
+        if (StringUtils.isEmpty(authenticatorProperties.get(MOSIPAuthenticatorConstants.OIDC_CLIENT_ID))) {
             throw new AuthenticationFailedException("OIDC Client ID is not configured for the authenticator");
+        }
+        if (StringUtils.isEmpty(authenticatorProperties.get(MOSIPAuthenticatorConstants.DOMAIN_URI))) {
+            throw new AuthenticationFailedException("Domain URI is not configured for the authenticator");
+        }
+        if (StringUtils.isEmpty(authenticatorProperties.get(MOSIPAuthenticatorConstants.ENV))) {
+            authenticatorProperties.put(MOSIPAuthenticatorConstants.ENV,
+                    MOSIPAuthenticatorConstants.DEFAULT_ENVIRONMENT);
         }
     }
 
