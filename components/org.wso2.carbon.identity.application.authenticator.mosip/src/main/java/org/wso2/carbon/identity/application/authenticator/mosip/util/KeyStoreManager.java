@@ -25,128 +25,110 @@ import org.wso2.carbon.identity.application.authenticator.mosip.constant.MOSIPAu
 import org.wso2.carbon.identity.application.authenticator.mosip.exception.MOSIPAuthenticationException;
 import org.wso2.carbon.utils.CarbonUtils;
 
-import java.io.File;
-import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.security.KeyStore;
 import java.security.cert.Certificate;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.security.interfaces.RSAPrivateKey;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Manages keystore and certificate operations for MOSIP authentication.
- * This class handles loading certificates and keys required for MOSIP authentication operations.
+ * Implements Initialization-on-demand holder for thread-safe singleton.
  */
 public class KeyStoreManager {
 
     private static final Log log = LogFactory.getLog(KeyStoreManager.class);
 
-    // Directory constants - relative to CARBON_HOME
-    private static final String SECURITY_DIR = "repository" + File.separator + "resources" + File.separator +
-            "security";
+    private static final String SECURITY_DIR = "repository/resources/security";
     private static final String MOSIP_DIR = "mosip";
-    private static final String MOSIP_KEYSTORE_TYPE = "PKCS12";
+    private static final String KEYSTORE_TYPE = "PKCS12";
+    private static final char[] DEFAULT_PASSWORD = "changeit".toCharArray();
 
-    // Missing constants for partner key format
-    private static final String AUTH_PARTNER = "auth";
+    private final Path mosipSecurityPath;
+    private final Properties config = new Properties();
 
-    // Files needed in security/mosip directory:
-    // 1. mosip_auth.p12 - keystore containing the auth partner private key
-    // 2. mpartner-default-wso2-auth.pem - (optional) auth partner certificate in PEM format
-    // 3. ida-partner.cer - IDA certificate for encryption
-
-    // Cached resources
-    private X509Certificate authCertificate;
-    private RSAPrivateKey authPrivateKey;
-    private List<X509Certificate> authCertChain;
-    private X509Certificate idaPartnerCertificate;
-
-    // Configuration properties - using a single properties object
-    private Properties config;
-    private final String mosipSecurityPath;
-
-    // Singleton instance
-    private static volatile KeyStoreManager instance;
+    // Cached certificate and key references
+    private final AtomicReference<X509Certificate> authCertRef = new AtomicReference<>();
+    private final AtomicReference<RSAPrivateKey> authKeyRef = new AtomicReference<>();
+    private final AtomicReference<List<X509Certificate>> authChainRef = new AtomicReference<>();
+    private final AtomicReference<X509Certificate> idaCertRef = new AtomicReference<>();
 
     /**
-     * Get the singleton instance of KeyStoreManager
-     *
-     * @return KeyStoreManager instance
-     */
-    public static KeyStoreManager getInstance() {
-
-        return getInstance(null);
-    }
-
-    /**
-     * Get the singleton instance of KeyStoreManager with authenticator properties
-     *
-     * @param properties The authenticator properties
-     * @return KeyStoreManager instance
-     */
-    public static KeyStoreManager getInstance(Map<String, String> properties) {
-
-        if (instance == null) {
-            synchronized (KeyStoreManager.class) {
-                if (instance == null) {
-                    instance = new KeyStoreManager(properties);
-                }
-            }
-        } else if (properties != null) {
-            // If instance exists but new properties are provided, reload the configuration
-            synchronized (KeyStoreManager.class) {
-                instance.loadConfiguration(properties);
-
-                // Reset the cached resources to force reload with new config
-                instance.authCertificate = null;
-                instance.authPrivateKey = null;
-                instance.authCertChain = null;
-                instance.idaPartnerCertificate = null;
-
-                if (log.isDebugEnabled()) {
-                    log.debug("KeyStoreManager configuration reloaded with new properties");
-                }
-            }
-        }
-
-        return instance;
-    }
-
-    /**
-     * Private constructor that initializes the manager and loads configuration
+     * Private constructor: sets up paths and initial configuration.
      */
     private KeyStoreManager(Map<String, String> properties) {
 
-        String carbonHome = CarbonUtils.getCarbonHome();
-        this.mosipSecurityPath = carbonHome + File.separator + SECURITY_DIR + File.separator + MOSIP_DIR;
-
-        // Create the MOSIP directory if it doesn't exist
-        File mosipDir = new File(this.mosipSecurityPath);
-        if (!mosipDir.exists()) {
-            if (mosipDir.mkdirs()) {
-                log.info("Created MOSIP security directory: " + this.mosipSecurityPath);
-            } else {
-                log.warn("Failed to create MOSIP security directory: " + this.mosipSecurityPath);
-            }
-        }
-
-        // Initialize configuration
-        this.config = new Properties();
+        this.mosipSecurityPath = Paths.get(CarbonUtils.getCarbonHome(), SECURITY_DIR, MOSIP_DIR);
+        ensureDirectoryExists(mosipSecurityPath);
         loadConfiguration(properties);
     }
 
     /**
-     * Load configuration properties from authenticator properties or use defaults
-     *
-     * @param properties The authenticator properties
+     * Holder class for lazy-loaded singleton instance.
+     */
+    private static class Holder {
+
+        private static final KeyStoreManager INSTANCE = new KeyStoreManager(null);
+    }
+
+    /**
+     * Retrieve the singleton instance.
+     */
+    public static KeyStoreManager getInstance() {
+
+        return Holder.INSTANCE;
+    }
+
+    /**
+     * Retrieve or reload singleton with given properties.
+     */
+    public static KeyStoreManager getInstance(Map<String, String> properties) {
+
+        KeyStoreManager manager = getInstance();
+        if (properties != null) {
+            synchronized (manager) {
+                manager.loadConfiguration(properties);
+                manager.clearCachedResources();
+                if (log.isDebugEnabled()) {
+                    log.debug("Configuration reloaded with new properties");
+                }
+            }
+        }
+        return manager;
+    }
+
+    /**
+     * Ensure security directory exists, creating it if necessary.
+     */
+    private void ensureDirectoryExists(Path path) {
+
+        try {
+            if (Files.notExists(path)) {
+                Files.createDirectories(path);
+                log.info("Created MOSIP security directory: " + path);
+            }
+        } catch (IOException e) {
+            log.warn("Failed to create MOSIP security directory: " + path, e);
+        }
+    }
+
+    /**
+     * Load configuration defaults and override with provided properties.
      */
     private void loadConfiguration(Map<String, String> properties) {
 
-        // Set default values
+        // Default filenames and aliases
         config.setProperty(MOSIPAuthenticatorConstants.AUTH_KEYSTORE_FILE,
                 MOSIPAuthenticatorConstants.DEFAULT_AUTH_KEYSTORE_FILE);
         config.setProperty(MOSIPAuthenticatorConstants.AUTH_KEYSTORE_ALIAS,
@@ -155,226 +137,168 @@ public class KeyStoreManager {
                 MOSIPAuthenticatorConstants.DEFAULT_AUTH_PEM_FILE);
         config.setProperty(MOSIPAuthenticatorConstants.IDA_CERT_FILE,
                 MOSIPAuthenticatorConstants.DEFAULT_IDA_CERT_FILE);
+        config.setProperty(MOSIPAuthenticatorConstants.KEYSTORE_PASSWORD, DEFAULT_PASSWORD.toString());
 
-        // Use authenticator properties if available
+        // Override defaults with any provided properties
         if (properties != null) {
-            if (StringUtils.isNotEmpty(properties.get(MOSIPAuthenticatorConstants.AUTH_KEYSTORE_FILE))) {
-                config.setProperty(MOSIPAuthenticatorConstants.AUTH_KEYSTORE_FILE,
-                        properties.get(MOSIPAuthenticatorConstants.AUTH_KEYSTORE_FILE));
-            }
-
-            if (StringUtils.isNotEmpty(properties.get(MOSIPAuthenticatorConstants.AUTH_KEYSTORE_ALIAS))) {
-                config.setProperty(MOSIPAuthenticatorConstants.AUTH_KEYSTORE_ALIAS,
-                        properties.get(MOSIPAuthenticatorConstants.AUTH_KEYSTORE_ALIAS));
-            }
-
-            if (StringUtils.isNotEmpty(properties.get(MOSIPAuthenticatorConstants.AUTH_PEM_FILE))) {
-                config.setProperty(MOSIPAuthenticatorConstants.AUTH_PEM_FILE,
-                        properties.get(MOSIPAuthenticatorConstants.AUTH_PEM_FILE));
-            }
-
-            if (StringUtils.isNotEmpty(properties.get(MOSIPAuthenticatorConstants.IDA_CERT_FILE))) {
-                config.setProperty(MOSIPAuthenticatorConstants.IDA_CERT_FILE,
-                        properties.get(MOSIPAuthenticatorConstants.IDA_CERT_FILE));
-            }
-
-            if (StringUtils.isNotEmpty(properties.get(MOSIPAuthenticatorConstants.KEYSTORE_PASSWORD))) {
-                config.setProperty(MOSIPAuthenticatorConstants.KEYSTORE_PASSWORD,
-                        properties.get(MOSIPAuthenticatorConstants.KEYSTORE_PASSWORD));
-            }
+            properties.forEach((key, value) -> {
+                if (StringUtils.isNotBlank(value) && config.containsKey(key)) {
+                    config.setProperty(key, value);
+                }
+            });
         }
     }
 
     /**
-     * Load a certificate from a file (PEM or DER format)
-     *
-     * @param certFilePath Path to the certificate file
-     * @return X509Certificate loaded from the file
-     * @throws MOSIPAuthenticationException If certificate loading fails
+     * Clear cached certificates and keys to force reload.
      */
-    private X509Certificate loadCertificateFromFile(String certFilePath) throws MOSIPAuthenticationException {
+    private void clearCachedResources() {
 
-        try (FileInputStream fis = new FileInputStream(certFilePath)) {
-            CertificateFactory cf = CertificateFactory.getInstance("X.509");
-            X509Certificate cert = (X509Certificate) cf.generateCertificate(fis);
-            log.info("Loaded certificate from: " + certFilePath +
-                    ", Subject: " + cert.getSubjectX500Principal().getName());
-            return cert;
-        } catch (Exception e) {
-            log.error("Failed to load certificate from file: " + certFilePath, e);
-            throw new MOSIPAuthenticationException("Failed to load certificate from file", e);
-        }
+        authCertRef.set(null);
+        authKeyRef.set(null);
+        authChainRef.set(null);
+        idaCertRef.set(null);
     }
 
     /**
-     * Get the AUTH certificate
-     *
-     * @return X509Certificate for AUTH operations
-     * @throws MOSIPAuthenticationException If loading fails
+     * Get the AUTH certificate, loading resources if needed.
      */
-    public synchronized X509Certificate getAuthCertificate() throws MOSIPAuthenticationException {
+    public X509Certificate getAuthCertificate() throws MOSIPAuthenticationException {
 
-        if (authCertificate == null) {
+        if (authCertRef.get() == null) {
             loadAuthResources();
         }
-        return authCertificate;
+        return authCertRef.get();
     }
 
     /**
-     * Get the AUTH private key
-     *
-     * @return RSAPrivateKey for AUTH operations
-     * @throws MOSIPAuthenticationException If loading fails
+     * Get the AUTH private key, loading resources if needed.
      */
-    public synchronized RSAPrivateKey getAuthPrivateKey() throws MOSIPAuthenticationException {
+    public RSAPrivateKey getAuthPrivateKey() throws MOSIPAuthenticationException {
 
-        if (authPrivateKey == null) {
+        if (authKeyRef.get() == null) {
             loadAuthResources();
         }
-        return authPrivateKey;
+        return authKeyRef.get();
     }
 
     /**
-     * Get the AUTH certificate chain
-     *
-     * @return List of X509Certificate for AUTH certificate chain
-     * @throws MOSIPAuthenticationException If loading fails
+     * Get the certificate chain for AUTH, loading resources if needed.
      */
-    public synchronized List<X509Certificate> getAuthCertChain() throws MOSIPAuthenticationException {
+    public List<X509Certificate> getAuthCertChain() throws MOSIPAuthenticationException {
 
-        if (authCertChain == null) {
+        if (authChainRef.get() == null) {
             loadAuthResources();
         }
-        return authCertChain;
+        return authChainRef.get();
     }
 
     /**
-     * Load the AUTH partner resources (certificate and private key)
-     *
-     * @throws MOSIPAuthenticationException If loading fails
+     * Load AUTH certificates and private key from PEM or keystore.
+     * Clears keystorePassword after use to prevent memory retention.
      */
-    private void loadAuthResources() throws MOSIPAuthenticationException {
+    private synchronized void loadAuthResources() throws MOSIPAuthenticationException {
 
+        char[] keystorePassword = null;
         try {
-            // Get configuration
-            String authPemFile = config.getProperty(MOSIPAuthenticatorConstants.AUTH_PEM_FILE);
-            String authKeystoreFile = config.getProperty(MOSIPAuthenticatorConstants.AUTH_KEYSTORE_FILE);
-            String authKeystoreAlias = config.getProperty(MOSIPAuthenticatorConstants.AUTH_KEYSTORE_ALIAS);
+            Path basePath = mosipSecurityPath;
+            keystorePassword = retrieveKeystorePassword();
 
-            // Get keystore password securely
-            char[] keystorePassword = getKeystorePassword();
-
-            try {
-                // First try loading certificate from PEM if it exists
-                String authPemPath = mosipSecurityPath + File.separator + authPemFile;
-                File pemFile = new File(authPemPath);
-                if (pemFile.exists()) {
-                    authCertificate = loadCertificateFromFile(authPemPath);
-                    authCertChain = new ArrayList<>();
-                    authCertChain.add(authCertificate);
-                }
-
-                // Load private key from keystore (required)
-                String authKeystorePath = mosipSecurityPath + File.separator + authKeystoreFile;
-                File keystoreFile = new File(authKeystorePath);
-                if (!keystoreFile.exists()) {
-                    throw new MOSIPAuthenticationException("AUTH keystore not found: " + authKeystorePath);
-                }
-
-                try (FileInputStream fis = new FileInputStream(keystoreFile)) {
-                    KeyStore keyStore = KeyStore.getInstance(MOSIP_KEYSTORE_TYPE);
-                    keyStore.load(fis, keystorePassword);
-
-                    if (!keyStore.containsAlias(authKeystoreAlias)) {
-                        throw new MOSIPAuthenticationException("Alias not found in keystore: " + authKeystoreAlias);
-                    }
-
-                    // Get private key
-                    authPrivateKey = (RSAPrivateKey) keyStore.getKey(authKeystoreAlias, keystorePassword);
-
-                    // If certificate not loaded from PEM, get it from keystore
-                    if (authCertificate == null) {
-                        authCertificate = (X509Certificate) keyStore.getCertificate(authKeystoreAlias);
-
-                        // Create certificate chain from keystore
-                        Certificate[] certs = keyStore.getCertificateChain(authKeystoreAlias);
-                        authCertChain = new ArrayList<>();
-                        for (Certificate cert : certs) {
-                            authCertChain.add((X509Certificate) cert);
-                        }
-                    }
-                }
-
-                log.info("Successfully loaded AUTH resources: " + authCertificate.getSubjectX500Principal().getName());
-
-            } finally {
-                // Clear the password from memory as soon as we're done with it
-                if (keystorePassword != null) {
-                    java.util.Arrays.fill(keystorePassword, '\u0000');
-                }
+            // Attempt to load PEM certificate if present
+            Path pemPath = basePath.resolve(config.getProperty(MOSIPAuthenticatorConstants.AUTH_PEM_FILE));
+            if (Files.exists(pemPath)) {
+                X509Certificate cert = loadCertificate(pemPath);
+                authCertRef.set(cert);
+                authChainRef.set(List.of(cert));
             }
 
+            // Load keystore and extract key/cert
+            Path keystorePath = basePath.resolve(config.getProperty(MOSIPAuthenticatorConstants.AUTH_KEYSTORE_FILE));
+            if (Files.notExists(keystorePath)) {
+                throw new MOSIPAuthenticationException("AUTH keystore not found at " + keystorePath);
+            }
+            KeyStore keyStore = KeyStore.getInstance(KEYSTORE_TYPE);
+            try (InputStream ksStream = Files.newInputStream(keystorePath)) {
+                keyStore.load(ksStream, keystorePassword);
+            }
+            String alias = config.getProperty(MOSIPAuthenticatorConstants.AUTH_KEYSTORE_ALIAS);
+            if (!keyStore.containsAlias(alias)) {
+                throw new MOSIPAuthenticationException("Alias not found in keystore: " + alias);
+            }
+
+            authKeyRef.set((RSAPrivateKey) keyStore.getKey(alias, keystorePassword));
+
+            if (authCertRef.get() == null) {
+                X509Certificate cert = (X509Certificate) keyStore.getCertificate(alias);
+                authCertRef.set(cert);
+                Certificate[] chain = keyStore.getCertificateChain(alias);
+                List<X509Certificate> certList = new ArrayList<>();
+                for (Certificate c : chain) {
+                    certList.add((X509Certificate) c);
+                }
+                authChainRef.set(certList);
+            }
+
+            log.info("Loaded AUTH resources for subject " + authCertRef.get().getSubjectX500Principal());
         } catch (Exception e) {
             log.error("Error loading AUTH resources", e);
             throw new MOSIPAuthenticationException("Error loading AUTH resources", e);
-        }
-    }
-
-    /**
-     * Get the keystore password securely
-     *
-     * @return The keystore password as a char array
-     */
-    private char[] getKeystorePassword() {
-
-        String configuredPassword = config.getProperty(MOSIPAuthenticatorConstants.KEYSTORE_PASSWORD);
-
-        if (StringUtils.isNotBlank(configuredPassword)) {
-            // If password is configured, use it (as a char array, not a String)
-            return configuredPassword.toCharArray();
-        }
-
-        // For production systems, implement a secure password retrieval method
-        // This could include:
-        // 1. Reading from environment variables
-        // 2. Using a secure vault
-        // 3. Using a password callback handler
-
-        // For development/testing only - this should be replaced in production
-        log.warn("No keystore password configured. Using default password for development. " +
-                "This is INSECURE for production environments.");
-
-        // Using a char array rather than a String, so it can be explicitly cleared
-        return "changeit".toCharArray();
-    }
-
-    /**
-     * Get the IDA partner certificate for encryption
-     *
-     * @return X509Certificate for IDA
-     * @throws MOSIPAuthenticationException If loading fails
-     */
-    public synchronized X509Certificate getIdaPartnerCertificate() throws MOSIPAuthenticationException {
-
-        if (idaPartnerCertificate != null) {
-            return idaPartnerCertificate;
-        }
-
-        try {
-            String idaPartnerCertFile = config.getProperty(MOSIPAuthenticatorConstants.IDA_CERT_FILE);
-            String certPath = mosipSecurityPath + File.separator + idaPartnerCertFile;
-            File certFile = new File(certPath);
-
-            if (!certFile.exists()) {
-                throw new MOSIPAuthenticationException("IDA certificate not found: " + certPath);
+        } finally {
+            if (keystorePassword != null) {
+                Arrays.fill(keystorePassword, '\u0000');
             }
-
-            idaPartnerCertificate = loadCertificateFromFile(certPath);
-            return idaPartnerCertificate;
-
-        } catch (Exception e) {
-            log.error("Error loading IDA certificate", e);
-            throw new MOSIPAuthenticationException("Error loading IDA certificate", e);
         }
+    }
+
+    /**
+     * Load an X.509 certificate from given path.
+     */
+    private X509Certificate loadCertificate(Path certPath) throws MOSIPAuthenticationException {
+
+        try (InputStream inStream = Files.newInputStream(certPath)) {
+            CertificateFactory factory = CertificateFactory.getInstance("X.509");
+            X509Certificate certificate = (X509Certificate) factory.generateCertificate(inStream);
+            log.info("Loaded certificate from " + certPath + " with subject " +
+                    certificate.getSubjectX500Principal());
+            return certificate;
+        } catch (Exception e) {
+            log.error("Failed to load certificate from " + certPath, e);
+            throw new MOSIPAuthenticationException("Failed to load certificate from " + certPath, e);
+        }
+    }
+
+    /**
+     * Retrieve keystore password from config or default (development only).
+     * Production code should integrate with a secure vault.
+     */
+    private char[] retrieveKeystorePassword() {
+
+        String configured = config.getProperty(MOSIPAuthenticatorConstants.KEYSTORE_PASSWORD);
+        if (StringUtils.isNotBlank(configured)) {
+            return configured.toCharArray();
+        }
+        log.warn("No keystore password configured; using default (insecure) password. " +
+                "Integrate with secure vault in production.");
+        return DEFAULT_PASSWORD.clone();
+    }
+
+    /**
+     * Get the IDA partner certificate for encryption, loading if needed.
+     */
+    public X509Certificate getIdaPartnerCertificate() throws MOSIPAuthenticationException {
+
+        if (idaCertRef.get() == null) {
+            synchronized (idaCertRef) {
+                if (idaCertRef.get() == null) {
+                    Path idaPath = mosipSecurityPath.resolve(
+                            config.getProperty(MOSIPAuthenticatorConstants.IDA_CERT_FILE));
+                    if (Files.notExists(idaPath)) {
+                        throw new MOSIPAuthenticationException("IDA certificate not found at " + idaPath);
+                    }
+                    idaCertRef.set(loadCertificate(idaPath));
+                }
+            }
+        }
+        return idaCertRef.get();
     }
 }

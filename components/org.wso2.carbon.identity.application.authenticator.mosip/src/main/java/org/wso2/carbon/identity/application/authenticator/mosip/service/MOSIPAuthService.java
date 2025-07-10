@@ -18,25 +18,28 @@
 
 package org.wso2.carbon.identity.application.authenticator.mosip.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import org.wso2.carbon.identity.application.authenticator.mosip.client.MOSIPClient;
+import org.apache.hc.core5.net.URIBuilder;
+import org.wso2.carbon.identity.application.authenticator.mosip.client.RESTClient;
 import org.wso2.carbon.identity.application.authenticator.mosip.constant.MOSIPAuthenticatorConstants;
 import org.wso2.carbon.identity.application.authenticator.mosip.constant.MOSIPErrorConstants;
-import org.wso2.carbon.identity.application.authenticator.mosip.exception.MOSIPAuthenticationException;
 import org.wso2.carbon.identity.application.authenticator.mosip.dto.MOSIPKycAuthRequestDTO;
 import org.wso2.carbon.identity.application.authenticator.mosip.dto.MOSIPKycAuthResponseDTO;
 import org.wso2.carbon.identity.application.authenticator.mosip.dto.MOSIPKycExchangeRequestDTO;
 import org.wso2.carbon.identity.application.authenticator.mosip.dto.MOSIPKycExchangeResponseDTO;
-import org.wso2.carbon.identity.application.authenticator.mosip.dto.MOSIPSendOtpRequestDTO;
-import org.wso2.carbon.identity.application.authenticator.mosip.dto.MOSIPSendOtpResponseDTO;
+import org.wso2.carbon.identity.application.authenticator.mosip.dto.MOSIPSendOTPRequestDTO;
+import org.wso2.carbon.identity.application.authenticator.mosip.dto.MOSIPSendOTPResponseDTO;
+import org.wso2.carbon.identity.application.authenticator.mosip.exception.MOSIPAuthenticationException;
 import org.wso2.carbon.identity.application.authenticator.mosip.util.CryptoUtil;
 import org.wso2.carbon.identity.application.authenticator.mosip.util.KeyStoreManager;
 
 import java.io.IOException;
 import java.io.Serializable;
+import java.net.URISyntaxException;
+import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -44,25 +47,22 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Service class that implements business logic for MOSIP Identity Authentication (IDA)
+ * Service class that implements business logic for MOSIP Identity Authentication (IDA).
+ * This class handles sending OTP, authenticating users with OTP, and retrieving KYC information
+ * from the MOSIP Identity Authentication service.
  */
 public class MOSIPAuthService implements Serializable {
 
-    private static final long serialVersionUID = 13123123123441L;
+    private static final long serialVersionUID = 9156072417087894671L;
     private static final Log log = LogFactory.getLog(MOSIPAuthService.class);
     private static final List<String> SUPPORTED_OTP_CHANNELS =
             Collections.unmodifiableList(Arrays.asList("email", "phone"));
     private static final int TRANSACTION_ID_MAX_LENGTH = 10;
     private static final String ALPHANUMERIC_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    private static final Random RANDOM = new Random();
+    private static final Random RANDOM = new SecureRandom();
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
-
-    // Cache for URL normalization to avoid redundant string operations
-    private static final ConcurrentHashMap<String, ConcurrentHashMap<String, String>> URL_CACHE =
-            new ConcurrentHashMap<>();
 
     // Default KYC attributes that are common across requests
     private static final List<String> DEFAULT_KYC_ATTRIBUTES = Collections.unmodifiableList(
@@ -80,28 +80,29 @@ public class MOSIPAuthService implements Serializable {
         }
     }
 
-    private final MOSIPClient mosipClient;
+    private final RESTClient RESTClient;
 
     /**
-     * Default constructor
+     * Default constructor that initializes a new MOSIPClient.
      */
     public MOSIPAuthService() {
 
-        this.mosipClient = new MOSIPClient();
+        this.RESTClient = new RESTClient();
     }
 
     /**
-     * Constructor with client dependency injection for testing
+     * Constructor with client dependency injection for testing.
      *
-     * @param mosipClient The MOSIP client to use
+     * @param RESTClient The MOSIP client to use
      */
-    public MOSIPAuthService(MOSIPClient mosipClient) {
+    public MOSIPAuthService(RESTClient RESTClient) {
 
-        this.mosipClient = mosipClient;
+        this.RESTClient = RESTClient;
     }
 
     /**
-     * Generate a random alphanumeric transaction ID with maximum length of 10 characters
+     * Generate a random alphanumeric transaction ID with maximum length of 10 characters.
+     * Uses SecureRandom for better randomness in a production environment.
      *
      * @return Random alphanumeric transaction ID
      */
@@ -115,45 +116,45 @@ public class MOSIPAuthService implements Serializable {
     }
 
     /**
-     * Normalize URL with caching to avoid redundant string operations
+     * Build a fully qualified endpoint URL using Apache's URIBuilder.
      *
-     * @param baseUrl  Base URL
-     * @param endpoint Endpoint path
-     * @return Normalized URL
+     * @param baseUrl      Base URL of the MOSIP service
+     * @param endpointPath API endpoint path
+     * @param pathSegments Additional path segments to append
+     * @return Fully qualified URL as a string
+     * @throws MOSIPAuthenticationException If URL building fails
      */
-    private String normalizeUrl(String baseUrl, String endpoint) {
+    private String buildEndpoint(String baseUrl, String endpointPath, String... pathSegments)
+            throws MOSIPAuthenticationException {
 
-        ConcurrentHashMap<String, String> endpointCache = URL_CACHE.computeIfAbsent(
-                baseUrl, k -> new ConcurrentHashMap<>());
+        if (StringUtils.isEmpty(baseUrl) || StringUtils.isEmpty(endpointPath)) {
+            throw new MOSIPAuthenticationException(
+                    MOSIPErrorConstants.GENERAL_ERROR,
+                    "Invalid URL parameters: baseUrl and endpointPath must not be empty"
+            );
+        }
 
-        return endpointCache.computeIfAbsent(endpoint, k -> {
-            String normalizedBaseUrl = baseUrl;
-            if (normalizedBaseUrl.endsWith("/")) {
-                normalizedBaseUrl = normalizedBaseUrl.substring(0, normalizedBaseUrl.length() - 1);
+        try {
+            URIBuilder builder = new URIBuilder(baseUrl)
+                    .setPath(endpointPath);
+
+            if (pathSegments != null && pathSegments.length > 0) {
+                builder.appendPathSegments(pathSegments);
             }
 
-            String normalizedEndpoint = endpoint;
-            if (!normalizedEndpoint.startsWith("/")) {
-                normalizedEndpoint = "/" + normalizedEndpoint;
-            }
-
-            return normalizedBaseUrl + normalizedEndpoint;
-        });
+            return builder.build().toString();
+        } catch (URISyntaxException e) {
+            log.error("Error building endpoint URL", e);
+            throw new MOSIPAuthenticationException(
+                    MOSIPErrorConstants.GENERAL_ERROR,
+                    "Invalid URL: " + e.getMessage(),
+                    e
+            );
+        }
     }
 
     /**
-     * Check if an OTP channel is supported
-     *
-     * @param channel Channel to check
-     * @return true if supported, false otherwise
-     */
-    private boolean isSupportedOtpChannel(String channel) {
-
-        return SUPPORTED_OTP_CHANNELS.contains(channel);
-    }
-
-    /**
-     * Send OTP to the user's registered channels (email/phone)
+     * Send OTP to the user's registered channels (email/phone).
      *
      * @param baseUrl       The base URL of the MOSIP IDA service
      * @param mispLK        MISP License Key
@@ -162,52 +163,86 @@ public class MOSIPAuthService implements Serializable {
      * @param uin           User's UIN
      * @param channels      List of channels to send OTP (email/phone)
      * @param transactionId Transaction ID (optional, will generate if null)
-     * @param domainUri     Domain URI
      * @return MOSIPSendOtpResponseDTO with the response
      * @throws MOSIPAuthenticationException If sending OTP fails
      */
-    public MOSIPSendOtpResponseDTO sendOtp(String baseUrl, String mispLK, String partnerId, String oidcClientId,
-                                           String uin, List<String> channels, String transactionId, String domainUri) throws
+    public MOSIPSendOTPResponseDTO sendOtp(String baseUrl, String mispLK, String partnerId, String oidcClientId,
+                                           String uin, List<String> channels, String transactionId) throws
             MOSIPAuthenticationException {
+
+        // Input validation
+        if (StringUtils.isEmpty(baseUrl) || StringUtils.isEmpty(mispLK) ||
+                StringUtils.isEmpty(partnerId) || StringUtils.isEmpty(oidcClientId) ||
+                StringUtils.isEmpty(uin)) {
+            throw new MOSIPAuthenticationException(
+                    MOSIPErrorConstants.INVALID_INPUT,
+                    "Required parameters cannot be null or empty"
+            );
+        }
+
+        if (channels == null || channels.isEmpty()) {
+            throw new MOSIPAuthenticationException(
+                    MOSIPErrorConstants.INVALID_INPUT,
+                    "At least one OTP channel must be specified"
+            );
+        }
 
         if (log.isDebugEnabled()) {
             log.debug("Sending OTP with transaction ID: " + transactionId);
         }
 
         try {
+            // Process transaction ID
+            final String finalTransactionId;
             if (StringUtils.isEmpty(transactionId)) {
-                transactionId = generateTransactionId();
+                finalTransactionId = generateTransactionId();
                 if (log.isDebugEnabled()) {
-                    log.debug("Generated new transaction ID: " + transactionId);
+                    log.debug("Generated new transaction ID: " + finalTransactionId);
                 }
             } else if (transactionId.length() > TRANSACTION_ID_MAX_LENGTH) {
-                transactionId = transactionId.substring(0, TRANSACTION_ID_MAX_LENGTH);
+                finalTransactionId = transactionId.substring(0, TRANSACTION_ID_MAX_LENGTH);
                 if (log.isDebugEnabled()) {
-                    log.debug("Truncated transaction ID to: " + transactionId);
+                    log.debug("Truncated transaction ID to: " + finalTransactionId);
                 }
+            } else {
+                finalTransactionId = transactionId;
             }
 
-            MOSIPSendOtpRequestDTO requestDTO = new MOSIPSendOtpRequestDTO();
+            // Build request
+            MOSIPSendOTPRequestDTO requestDTO = new MOSIPSendOTPRequestDTO();
             requestDTO.setId(MOSIPAuthenticatorConstants.DEFAULT_OTP_ID);
             requestDTO.setVersion(MOSIPAuthenticatorConstants.DEFAULT_AUTH_VERSION);
             requestDTO.setRequestTime(CryptoUtil.getUTCDateTime());
-            requestDTO.setTransactionID(transactionId);
+            requestDTO.setTransactionID(finalTransactionId);
             requestDTO.setIndividualId(uin);
             requestDTO.setIndividualIdType(MOSIPAuthenticatorConstants.DEFAULT_ID_TYPE);
 
+            // Filter channels to include only supported ones
             List<String> supportedChannels = new ArrayList<>();
             for (String channel : channels) {
-                if (isSupportedOtpChannel(channel)) {
+                if (SUPPORTED_OTP_CHANNELS.contains(channel)) {
                     supportedChannels.add(channel);
                 }
             }
+
+            if (supportedChannels.isEmpty()) {
+                throw new MOSIPAuthenticationException(
+                        MOSIPErrorConstants.INVALID_INPUT,
+                        "No supported OTP channels specified. Supported channels: " + SUPPORTED_OTP_CHANNELS
+                );
+            }
+
             requestDTO.setOtpChannel(supportedChannels);
 
-            String endpoint = normalizeUrl(baseUrl, MOSIPAuthenticatorConstants.SEND_OTP_ENDPOINT)
-                    + "/" + mispLK + "/" + partnerId + "/" + oidcClientId;
+            // Build endpoint URL and prepare request
+            String endpoint = buildEndpoint(
+                    baseUrl,
+                    MOSIPAuthenticatorConstants.SEND_OTP_ENDPOINT,
+                    mispLK, partnerId, oidcClientId
+                                           );
 
             String requestBody = OBJECT_MAPPER.writeValueAsString(requestDTO);
-            String signature = CryptoUtil.generateMosipRequestSignatureAuthKey(requestBody);
+            String signature = CryptoUtil.generateMOSIPRequestSignatureAuthKey(requestBody);
 
             Map<String, String> headers = new HashMap<>();
             headers.put(MOSIPAuthenticatorConstants.SIGNATURE_HEADER, signature);
@@ -215,16 +250,31 @@ public class MOSIPAuthService implements Serializable {
                     MOSIPAuthenticatorConstants.AUTHORIZATION_HEADER);
 
             Map<String, String> requestContext = new HashMap<>();
-            requestContext.put(MOSIPAuthenticatorConstants.TRANSACTION_ID, transactionId);
+            requestContext.put(MOSIPAuthenticatorConstants.TRANSACTION_ID, finalTransactionId);
 
-            String responseBody = mosipClient.sendPostRequest(endpoint, requestBody, headers, requestContext);
+            // Send request and process response
+            String responseBody = RESTClient.sendPostRequest(endpoint, requestBody, headers, requestContext);
 
-            MOSIPSendOtpResponseDTO response = OBJECT_MAPPER.readValue(responseBody, MOSIPSendOtpResponseDTO.class);
-            if (response.getErrors() != null && !response.getErrors().isEmpty()) {
-                MOSIPSendOtpResponseDTO.ErrorData errorData = response.getErrors().get(0);
-                throw new MOSIPAuthenticationException(errorData.getErrorCode(), errorData.getErrorMessage());
+            MOSIPSendOTPResponseDTO response = OBJECT_MAPPER.readValue(
+                    responseBody, MOSIPSendOTPResponseDTO.class
+                                                                      );
+
+            if (response == null) {
+                throw new MOSIPAuthenticationException(
+                        MOSIPErrorConstants.RESPONSE_PARSING_ERROR,
+                        "Received null response from MOSIP service"
+                );
             }
+
+            if (response.getErrors() != null && !response.getErrors().isEmpty()) {
+                MOSIPSendOTPResponseDTO.ErrorData err = response.getErrors().get(0);
+                throw new MOSIPAuthenticationException(err.getErrorCode(), err.getErrorMessage());
+            }
+
             return response;
+        } catch (MOSIPAuthenticationException e) {
+            // Re-throw MOSIPAuthenticationException as is
+            throw e;
         } catch (Exception e) {
             log.error("Error occurred while sending OTP: " + e.getMessage(), e);
             String errorCode = determineErrorCode(e);
@@ -233,7 +283,7 @@ public class MOSIPAuthService implements Serializable {
     }
 
     /**
-     * Authenticate a user with MOSIP using UIN and OTP
+     * Authenticate a user with MOSIP using UIN and OTP.
      *
      * @param baseUrl       The base URL of the MOSIP IDA service
      * @param mispLK        MISP License Key
@@ -246,18 +296,29 @@ public class MOSIPAuthService implements Serializable {
      * @param domainUri     Domain URI
      * @return MOSIPKycAuthResponseDTO with the response
      * @throws MOSIPAuthenticationException If authentication fails
-     * @throws IOException                  If a network error occurs
      */
     public MOSIPKycAuthResponseDTO authenticate(String baseUrl, String mispLK, String partnerId,
                                                 String oidcClientId, String uin, String otp,
                                                 String transactionId, String environment, String domainUri)
-            throws MOSIPAuthenticationException, IOException {
+            throws MOSIPAuthenticationException {
+
+        // Input validation
+        if (StringUtils.isEmpty(baseUrl) || StringUtils.isEmpty(mispLK) ||
+                StringUtils.isEmpty(partnerId) || StringUtils.isEmpty(oidcClientId) ||
+                StringUtils.isEmpty(uin) || StringUtils.isEmpty(otp) ||
+                StringUtils.isEmpty(transactionId)) {
+            throw new MOSIPAuthenticationException(
+                    MOSIPErrorConstants.INVALID_INPUT,
+                    "Required parameters cannot be null or empty"
+            );
+        }
 
         if (log.isDebugEnabled()) {
             log.debug("Authenticating with transaction ID: " + transactionId);
         }
 
         try {
+            // Build request
             MOSIPKycAuthRequestDTO requestDTO = new MOSIPKycAuthRequestDTO();
             requestDTO.setId(MOSIPAuthenticatorConstants.DEFAULT_KYC_AUTH_ID);
             requestDTO.setVersion(MOSIPAuthenticatorConstants.DEFAULT_AUTH_VERSION);
@@ -270,24 +331,27 @@ public class MOSIPAuthService implements Serializable {
             requestDTO.setEnv(environment);
             requestDTO.setAllowedKycAttributes(DEFAULT_KYC_ATTRIBUTES);
 
-            MOSIPKycAuthRequestDTO.AuthRequest authRequest = new MOSIPKycAuthRequestDTO.AuthRequest();
-            authRequest.setOtp(otp);
-            authRequest.setTimestamp(CryptoUtil.getUTCDateTime());
+            MOSIPKycAuthRequestDTO.AuthRequest authReq = new MOSIPKycAuthRequestDTO.AuthRequest();
+            authReq.setOtp(otp);
+            authReq.setTimestamp(CryptoUtil.getUTCDateTime());
 
-            String authRequestString = OBJECT_MAPPER.writeValueAsString(authRequest);
+            String authReqStr = OBJECT_MAPPER.writeValueAsString(authReq);
+            CryptoUtil.EncryptedRequestInfo encInfo = CryptoUtil.encryptRequest(authReqStr);
 
-            CryptoUtil.EncryptedRequestInfo encryptedInfo = CryptoUtil.encryptRequest(authRequestString);
+            requestDTO.setRequestHMAC(encInfo.getHmac());
+            requestDTO.setRequestSessionKey(encInfo.getEncryptedSessionKey());
+            requestDTO.setThumbprint(encInfo.getBase64UrlEncodedThumbprint());
+            requestDTO.setRequest(encInfo.getBase64UrlEncodedRequest());
 
-            requestDTO.setRequestHMAC(encryptedInfo.getHmac());
-            requestDTO.setRequestSessionKey(encryptedInfo.getEncryptedSessionKey());
-            requestDTO.setThumbprint(encryptedInfo.getBase64UrlEncodedThumbprint());
-            requestDTO.setRequest(encryptedInfo.getBase64UrlEncodedRequest());
-
-            String endpoint = normalizeUrl(baseUrl, MOSIPAuthenticatorConstants.KYC_AUTH_ENDPOINT)
-                    + "/" + mispLK + "/" + partnerId + "/" + oidcClientId;
+            // Build endpoint URL and prepare request
+            String endpoint = buildEndpoint(
+                    baseUrl,
+                    MOSIPAuthenticatorConstants.KYC_AUTH_ENDPOINT,
+                    mispLK, partnerId, oidcClientId
+                                           );
 
             String requestBody = OBJECT_MAPPER.writeValueAsString(requestDTO);
-            String signature = CryptoUtil.generateMosipRequestSignatureAuthKey(requestBody);
+            String signature = CryptoUtil.generateMOSIPRequestSignatureAuthKey(requestBody);
 
             Map<String, String> headers = new HashMap<>();
             headers.put(MOSIPAuthenticatorConstants.SIGNATURE_HEADER, signature);
@@ -297,27 +361,45 @@ public class MOSIPAuthService implements Serializable {
             Map<String, String> requestContext = new HashMap<>();
             requestContext.put(MOSIPAuthenticatorConstants.TRANSACTION_ID, transactionId);
 
-            String responseBody = mosipClient.sendPostRequest(endpoint, requestBody, headers, requestContext);
-            MOSIPKycAuthResponseDTO authResponse = OBJECT_MAPPER.readValue(responseBody, MOSIPKycAuthResponseDTO.class);
-            if (authResponse.getErrors() != null && !authResponse.getErrors().isEmpty()) {
-                MOSIPKycAuthResponseDTO.ErrorData errorData = authResponse.getErrors().get(0);
-                throw new MOSIPAuthenticationException(errorData.getErrorCode(), errorData.getErrorMessage());
+            // Send request and process response
+            String respBody = RESTClient.sendPostRequest(endpoint, requestBody, headers, requestContext);
+            MOSIPKycAuthResponseDTO resp = OBJECT_MAPPER.readValue(respBody, MOSIPKycAuthResponseDTO.class);
+
+            if (resp == null) {
+                throw new MOSIPAuthenticationException(
+                        MOSIPErrorConstants.RESPONSE_PARSING_ERROR,
+                        "Received null response from MOSIP service"
+                );
             }
-            return authResponse;
+
+            if (resp.getErrors() != null && !resp.getErrors().isEmpty()) {
+                MOSIPKycAuthResponseDTO.ErrorData err = resp.getErrors().get(0);
+                throw new MOSIPAuthenticationException(err.getErrorCode(), err.getErrorMessage());
+            }
+
+            return resp;
+        } catch (MOSIPAuthenticationException e) {
+            // Re-throw MOSIPAuthenticationException as is
+            throw e;
         } catch (IOException e) {
             log.error("I/O error during MOSIP authentication: " + e.getMessage(), e);
-            throw new MOSIPAuthenticationException(MOSIPErrorConstants.NETWORK_ERROR,
-                    "Network error during authentication: " + e.getMessage(), e);
+            throw new MOSIPAuthenticationException(
+                    MOSIPErrorConstants.NETWORK_ERROR,
+                    "Network error during authentication: " + e.getMessage(),
+                    e);
         } catch (Exception e) {
             log.error("Error during MOSIP authentication: " + e.getMessage(), e);
             String errorCode = determineErrorCode(e);
-            throw new MOSIPAuthenticationException(errorCode,
-                    "Authentication error: " + e.getMessage(), e);
+            throw new MOSIPAuthenticationException(
+                    errorCode,
+                    "Authentication error: " + e.getMessage(),
+                    e
+            );
         }
     }
 
     /**
-     * Exchange KYC token for user information
+     * Exchange KYC token for user information.
      *
      * @param baseUrl         The base URL of the MOSIP IDA service
      * @param mispLK          MISP License Key
@@ -327,23 +409,38 @@ public class MOSIPAuthService implements Serializable {
      * @param kycToken        KYC token received from authentication
      * @param consentedClaims List of claims for which consent is given
      * @param transactionId   Transaction ID
-     * @param environment     Environment (e.g., Staging, Production)
-     * @param domainUri       Domain URI
      * @return MOSIPKycExchangeResponseDTO with the response
      * @throws MOSIPAuthenticationException If KYC exchange fails
      */
     public MOSIPKycExchangeResponseDTO kycExchange(String baseUrl, String mispLK, String partnerId,
                                                    String oidcClientId, String uin, String kycToken,
-                                                   List<String> consentedClaims, String transactionId,
-                                                   String environment, String domainUri)
+                                                   List<String> consentedClaims, String transactionId)
             throws MOSIPAuthenticationException {
+
+        // Input validation
+        if (StringUtils.isEmpty(baseUrl) || StringUtils.isEmpty(mispLK) ||
+                StringUtils.isEmpty(partnerId) || StringUtils.isEmpty(oidcClientId) ||
+                StringUtils.isEmpty(uin) || StringUtils.isEmpty(kycToken) ||
+                StringUtils.isEmpty(transactionId)) {
+            throw new MOSIPAuthenticationException(
+                    MOSIPErrorConstants.INVALID_INPUT,
+                    "Required parameters cannot be null or empty"
+            );
+        }
+
+        if (consentedClaims == null || consentedClaims.isEmpty()) {
+            throw new MOSIPAuthenticationException(
+                    MOSIPErrorConstants.INVALID_INPUT,
+                    "Consented claims list cannot be null or empty"
+            );
+        }
 
         if (log.isDebugEnabled()) {
             log.debug("Exchanging KYC token with transaction ID: " + transactionId);
         }
 
         try {
-            // Create the request DTO
+            // Build request
             MOSIPKycExchangeRequestDTO requestDTO = new MOSIPKycExchangeRequestDTO();
             requestDTO.setId(MOSIPAuthenticatorConstants.DEFAULT_KYC_EXCHANGE_ID);
             requestDTO.setVersion(MOSIPAuthenticatorConstants.DEFAULT_AUTH_VERSION);
@@ -353,30 +450,21 @@ public class MOSIPAuthService implements Serializable {
             requestDTO.setKycToken(kycToken);
             requestDTO.setConsentObtained(consentedClaims);
 
-            // Add locales - using default locale
             List<String> locales = new ArrayList<>();
             locales.add(MOSIPAuthenticatorConstants.DEFAULT_LOCALE);
             requestDTO.setLocales(locales);
-
-            // Set the response type to JWT as per working example
             requestDTO.setRespType(MOSIPAuthenticatorConstants.RESP_TYPE);
 
-            // Convert DTO to JSON string for request
-            ObjectMapper mapper = new ObjectMapper();
-            String requestBody = mapper.writeValueAsString(requestDTO);
+            // Build endpoint URL and prepare request
+            String endpoint = buildEndpoint(
+                    baseUrl,
+                    MOSIPAuthenticatorConstants.KYC_EXCHANGE_ENDPOINT,
+                    mispLK, partnerId, oidcClientId
+                                           );
 
-            // Send request to MOSIP IDA service
-            String endpoint = normalizeUrl(baseUrl, MOSIPAuthenticatorConstants.KYC_EXCHANGE_ENDPOINT)
-                    + "/" + mispLK + "/" + partnerId + "/" + oidcClientId;
+            String requestBody = OBJECT_MAPPER.writeValueAsString(requestDTO);
+            String signature = CryptoUtil.generateMOSIPRequestSignatureAuthKey(requestBody);
 
-            // Generate signature using CryptoUtil
-            String signature = CryptoUtil.generateMosipRequestSignatureAuthKey(requestBody);
-
-            if (log.isDebugEnabled()) {
-                log.debug("Sending MOSIP KYC exchange request to: " + endpoint);
-            }
-
-            // Set headers and request context
             Map<String, String> headers = new HashMap<>();
             headers.put(MOSIPAuthenticatorConstants.SIGNATURE_HEADER, signature);
             headers.put(MOSIPAuthenticatorConstants.AUTHORIZATION_HEADER,
@@ -385,29 +473,42 @@ public class MOSIPAuthService implements Serializable {
             Map<String, String> requestContext = new HashMap<>();
             requestContext.put(MOSIPAuthenticatorConstants.TRANSACTION_ID, transactionId);
 
-            // Send HTTP request
-            String responseBody = mosipClient.sendPostRequest(endpoint, requestBody, headers, requestContext);
+            // Send request and process response
+            String respBody = RESTClient.sendPostRequest(endpoint, requestBody, headers, requestContext);
+            MOSIPKycExchangeResponseDTO resp = OBJECT_MAPPER.readValue(respBody, MOSIPKycExchangeResponseDTO.class);
 
-            MOSIPKycExchangeResponseDTO exchangeResponse =
-                    OBJECT_MAPPER.readValue(responseBody, MOSIPKycExchangeResponseDTO.class);
-            if (exchangeResponse.getErrors() != null && !exchangeResponse.getErrors().isEmpty()) {
-                MOSIPKycExchangeResponseDTO.ErrorData errorData = exchangeResponse.getErrors().get(0);
-                throw new MOSIPAuthenticationException(errorData.getErrorCode(), errorData.getErrorMessage());
+            if (resp == null) {
+                throw new MOSIPAuthenticationException(
+                        MOSIPErrorConstants.RESPONSE_PARSING_ERROR,
+                        "Received null response from MOSIP service"
+                );
             }
-            return exchangeResponse;
+
+            if (resp.getErrors() != null && !resp.getErrors().isEmpty()) {
+                MOSIPKycExchangeResponseDTO.ErrorData err = resp.getErrors().get(0);
+                throw new MOSIPAuthenticationException(err.getErrorCode(), err.getErrorMessage());
+            }
+
+            return resp;
+        } catch (MOSIPAuthenticationException e) {
+            // Re-throw MOSIPAuthenticationException as is
+            throw e;
         } catch (Exception e) {
-            String errorMsg = "Error occurred during KYC exchange: " + e.getMessage();
-            log.error(errorMsg, e);
+            log.error("Error occurred during KYC exchange: " + e.getMessage(), e);
             String errorCode = determineErrorCode(e);
-            throw new MOSIPAuthenticationException(errorMsg, errorCode, e);
+            throw new MOSIPAuthenticationException(
+                    errorCode,
+                    "Error during KYC exchange: " + e.getMessage(),
+                    e
+            );
         }
     }
 
     /**
-     * Determine error code for retry handling
+     * Determine error code for retry handling based on exception type.
      *
-     * @param e Exception that occurred
-     * @return Appropriate error code for the exception
+     * @param e The exception to analyze
+     * @return Appropriate error code
      */
     private String determineErrorCode(Exception e) {
 
@@ -415,16 +516,14 @@ public class MOSIPAuthService implements Serializable {
                 ((MOSIPAuthenticationException) e).getErrorCode() != null) {
             return ((MOSIPAuthenticationException) e).getErrorCode();
         }
-
         if (e instanceof java.net.SocketTimeoutException) {
             return MOSIPErrorConstants.TIMEOUT_ERROR;
         }
-
         if (e instanceof java.net.ConnectException ||
                 e instanceof java.net.UnknownHostException) {
             return MOSIPErrorConstants.NETWORK_ERROR;
         }
-
         return MOSIPErrorConstants.GENERAL_ERROR;
     }
 }
+

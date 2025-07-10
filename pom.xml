@@ -68,7 +68,7 @@
         <lombok.version>1.18.32</lombok.version>
 
         <!-- Define Nimbus JOSE JWT version and version range -->
-        <nimbusds.version>7.3.0.wso2v1</nimbusds.version>
+        <nimbusds.version>7.9.0.wso2v1</nimbusds.version>
         <nimbusds.osgi.version.range>[7.3.0,8.0.0)</nimbusds.osgi.version.range>
 
         <!-- HTTP components versions -->

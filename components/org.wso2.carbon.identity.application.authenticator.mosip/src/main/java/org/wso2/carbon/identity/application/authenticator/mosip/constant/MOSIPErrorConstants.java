@@ -30,6 +30,8 @@ public class MOSIPErrorConstants {
     public static final String COMMUNICATION_ERROR = "MOSIP_COMM_ERROR";
     public static final String NETWORK_ERROR = "MOSIP_NETWORK_ERROR";
     public static final String TIMEOUT_ERROR = "MOSIP_TIMEOUT_ERROR";
+    public static final String INVALID_INPUT = "MOSIP_INVALID_INPUT";
+    public static final String RESPONSE_PARSING_ERROR = "MOSIP_RESPONSE_PARSING_ERROR";
 
     // Authentication error codes
     public static final String AUTH_ERROR = "MOSIP_AUTH_ERROR";
